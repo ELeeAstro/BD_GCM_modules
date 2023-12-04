@@ -5,8 +5,8 @@ module BD_clouds_mod
   integer, parameter :: dp = REAL64
 
   real(dp), parameter :: rho_c = 3.560_dp
-  real(dp), parameter :: t_grow = 150.0_dp
-  real(dp), parameter :: t_evap = 150.0_dp
+  real(dp), parameter :: t_grow = 10.0_dp
+  real(dp), parameter :: t_evap = 10.0_dp
 
   real(dp), parameter :: reff = 6.65_dp * 1e-4_dp
   real(dp), parameter :: rm = 2.0_dp * 1e-4_dp
@@ -78,7 +78,7 @@ contains
 
     do k = 1, nlay
 
-      if (qc(k) < 1.0e-10) then
+      if (qc(k) < 1.0e-8) then
         k_ext_cld(k) = 1.0e-30_dp
         a_cld(k) = 1.0e-30_dp
         g_cld(k) = 1.0e-30_dp 

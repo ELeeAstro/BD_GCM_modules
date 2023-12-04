@@ -290,7 +290,7 @@ program FMS_BD_RC
     case('Tracer')
       call BD_clouds_chem(nlay, t_step, cld_sp(1), q(:,nsp+1), q(:,nsp+2), pl, Tl, Rd_bar, Kzz, q0_cld(1), grav, sat)
       call BD_clouds_vf(nlay, nsp, Rd_bar, grav, q(:,1:nsp), pl, Tl, q(:,nsp+2), vf)
-      call BD_clouds_adv(nlay, nlev, Rd_bar, grav, Tl, pe, 1, t_step, q(:,nsp+2), vf)
+      call BD_clouds_adv(nlay, nlev, Rd_bar, grav, Tl, pl, pe, 1, t_step, q(:,nsp+2), vf)
     case('None')
     case default
       print*, 'Invalid cloud_scheme: ', trim(cloud_chem_scheme)
@@ -352,7 +352,7 @@ program FMS_BD_RC
       tau_IRe(1) = (k_IRl(1) * pe(1)) / grav
       do k = 1, nlay
         tau_IRe(k+1) = tau_IRe(k) + (k_IRl(k) * dpe(k)) / grav
-       print*, k, k_ext_cld(k), lw_a(k), lw_g(k), tau_IRe(k+1), q(k,nsp+2)
+       !print*, k, k_ext_cld(k), lw_a(k), lw_g(k), tau_IRe(k+1), q(k,nsp+2)
       end do
     case('None')
       k_ext_cld(:) = 0.0_dp

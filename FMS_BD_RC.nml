@@ -6,7 +6,7 @@ chem_scheme = 'CE'
 adj_scheme = 'MLT'
 diff_scheme = 'Explicit'
 cloud_chem_scheme = 'Tracer'
-cloud_opac_scheme = 'None'
+cloud_opac_scheme = 'Rosseland'
 kappa_prime_calc = 'NASA9'
 
 nlay = 60
@@ -16,10 +16,10 @@ b_sh = 'hybrid_sig/Hybrid_sig_60_b.txt'
 pref = 1e7
 
 t_step = 60.0
-nstep = 40000
+nstep = 100000
 Rd_air = 3556.8
 cp_air = 1.3e4
-grav = 1000.0 !316.0
+grav = 316.0
 Tint = 1100.0
 
 Bezier = .True.

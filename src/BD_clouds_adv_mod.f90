@@ -1,31 +1,40 @@
- module BD_clouds_adv_mod
+module BD_clouds_adv_mod
   use, intrinsic :: iso_fortran_env ! Requires fortran 2008
   implicit none
 
   integer, parameter :: dp = REAL64
 
   real(dp), parameter :: cfl = 0.95_dp
+  real(dp), parameter :: kb = 1.380649e-23_dp
 
   public :: BD_clouds_adv
   private :: minmod
 
   contains
  
-  subroutine BD_clouds_adv(nlay, nlev, Rd_air, grav, Tl, pe, nq, tend, q, vf)
+  subroutine BD_clouds_adv(nlay, nlev, Rd_air, grav, Tl, pl, pe, nq, tend, q, vf)
     implicit none
 
     integer, intent(in) :: nlay, nlev, nq
     real(dp), dimension(nlay,nq), intent(inout) :: q
-    real(dp), dimension(nlay), intent(in) :: vf, Rd_air, Tl
+    real(dp), dimension(nlay), intent(in) :: vf, Rd_air, Tl, pl
     real(dp), dimension(nlev), intent(in) :: pe
     real(dp), intent(in) :: tend, grav
 
-    real(dp), dimension(nlay) :: qc
-    real(dp), dimension(nlay) :: sig, c, vf_c, delz
-    real(dp), dimension(nlev) :: alte
-    real(dp) :: D, tnow, dt
-    integer :: i, k, iit, n
+    real(dp), dimension(nlay,nq) :: qc
+    real(dp), dimension(nlay) :: sig, c, vf_c, delz, delz_mid
+    real(dp), dimension(nlev) :: alte, vf_e
+    real(dp) :: tnow, dt
+    integer :: k, iit, n
 
+    ! Convert to m s-1
+    vf_c(:) = vf(:)/100.0_dp 
+
+    ! Find velocity at levels
+    vf_e(1) = vf_c(1)
+    do k = 2, nlev
+      vf_e(k) = (vf_c(k-1) + vf_c(k))/2.0_dp
+    end do
 
     !! First calculate the vertical height (m) assuming hydrostatic equilibrium
     alte(nlev) = 0.0_dp
@@ -34,18 +43,19 @@
       delz(k) = alte(k) - alte(k+1)
     end do
 
-    vf_c(:) = vf(:)/100.0_dp ! Convert to m s-1
+    !! Find differences between layers directly
+    do k = 1, nlay-1
+      delz_mid(k) = (alte(k) + alte(k+1))/2.0_dp - (alte(k+1) + alte(k+2))/2.0_dp
+    end do
+    delz_mid(nlay) = delz(nlay)
 
     !! Find minimum timestep that allows the CFL condition
     dt = tend
     do k = 1, nlay
-      dt = min(dt,cfl*(delz(k))/abs(vf_c(k)))
+      dt = min(dt,cfl*(delz_mid(k))/abs(vf_e(k+1)))
     enddo
 
-    tnow = 0.0_dp
-    iit = 1
-
-    do while ((tnow < tend) .and. (iit < 100000))
+    do while ((tnow < tend) .and. (iit < 1000000))
 
       ! If next time step overshoots - last time step is equal tend
       if (tnow + dt > tend) then
@@ -53,41 +63,30 @@
       end if
 
       !! Find the courant number
-      c(:) = abs(vf_c(:)) * dt / delz(:)
+      c(:) = abs(vf_e(2:nlev)) * dt / delz_mid(:)
 
       do n = 1, nq
 
-        ! Apply boundary conditions
-        q(1,n) = 1e-30_dp
-        q(nlay,n) = 1e-30_dp
-
-        q(:,n) = max(q(:,n),1e-30_dp)
-
         !! Find the minmod limiter
-        call minmod(nlay,q(:,n),delz,sig)
+        call minmod(nlay,q(:,n),delz_mid,sig)
 
         !! Perform McCormack step
-        qc(:) = q(:,n)
-        qc(1:nlay-1) = q(1:nlay-1,n) - sig(1:nlay-1)*c(1:nlay-1)*(q(2:nlay,n) - q(1:nlay-1,n))
-        q(2:nlay,n) = 0.5_dp * (q(2:nlay,n) + qc(2:nlay) - c(2:nlay)*(qc(2:nlay) - qc(1:nlay-1)))
+        qc(:,n) = q(:,n)
+        qc(:nlay-1,n) = q(:nlay-1,n) - sig(:nlay-1)*c(:nlay-1)*(q(2:nlay,n) - q(:nlay-1,n))
+        q(2:nlay,n) = 0.5_dp * (q(2:nlay,n) + qc(2:nlay,n) - c(2:nlay)*(qc(2:nlay,n) - qc(:nlay-1,n)))
+
+        q(:,n) = max(q(:,n),1e-30_dp)
 
       end do
 
       tnow = tnow + dt
       iit = iit + 1
 
-    end do
+      q(nlay,:) = 1e-30_dp
 
-    do n = 1, nq
-      q(:,n) = max(q(:,n),1e-30_dp)
     end do
-
-    ! Apply boundary conditions
-    q(1,:) = 1e-30_dp
-    q(nlay,:) = 1e-30_dp
 
   end subroutine BD_clouds_adv
-
 
   subroutine minmod(nlay,q,dz,sig)
     implicit none

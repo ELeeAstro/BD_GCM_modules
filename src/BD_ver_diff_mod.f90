@@ -29,7 +29,7 @@ contains
     real(dp), dimension(nlev) :: alte, lpe, Kzz_e, Te, nde
     real(dp), dimension(nlay) :: delz, delz_mid
 
-    real(dp), dimension(nlay) :: lKzz, lpl, lTl, nd
+    real(dp), dimension(nlay) ::  lpl, lTl, nd
     real(dp), dimension(nlay,nq) :: flx
     real(dp), dimension(nq) :: phi_jp, phi_jm
 
@@ -41,16 +41,12 @@ contains
     lpe(:) = log10(pe(:))
     lpl(:) = log10(pl(:))
     lTl(:) = log10(Tl(:))
-    lKzz(:) = log10(Kzz(:))
-    !! Perform interpolation to level edges using log-linear
-    !interpolation
-    do k = 2, nlay
-      call linear_interp(lpe(k), lpl(k-1), lpl(k), lKzz(k-1), lKzz(k), Kzz_e(k))
-      Kzz_e(k) = 10.0_dp**Kzz_e(k)
-    end do
-    
+
+    ! Find Kzz at levels
     Kzz_e(1) = Kzz(1)
-    Kzz_e(nlev) = Kzz(nlay)
+    do k = 2, nlev
+      Kzz_e(k) = (Kzz(k-1) + Kzz(k))/2.0_dp
+    end do
 
     do k = 2, nlay
       call linear_interp(lpe(k), lpl(k-1), lpl(k), lTl(k-1), lTl(k), Te(k))
@@ -74,17 +70,18 @@ contains
     end do
 
     !! Find differences between layers directly
-    do k = nlay, 2, -1
-      delz_mid(k) = (alte(k-1) + alte(k))/2.0_dp - (alte(k) + alte(k+1))/2.0_dp
+    do k = 1, nlay-1
+      delz_mid(k) = (alte(k) + alte(k+1))/2.0_dp - (alte(k+1) + alte(k+2))/2.0_dp
     end do
-    
+    delz_mid(nlay) = delz(nlay)
+
     !! We now follow the 1st order VULCAN scheme
 
     !! Prepare timestepping routine
     !! Find minimum timestep that satifies the CFL condition
     dt = t_end
     do k = 1, nlay
-      dt = min(dt,CFL*(delz(k))**2/Kzz(k))
+      dt = min(dt,CFL*(delz_mid(k))**2/Kzz_e(k+1))
     end do
 
     !! Begin timestepping routine
