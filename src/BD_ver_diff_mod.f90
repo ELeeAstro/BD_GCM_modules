@@ -66,15 +66,13 @@ contains
     nd(:) = pl(:)/(kb * Tl(:))
     nde(:) = pe(:)/(kb * Te(:)) 
 
-    !! First calculate the vertical height (m) assuming hydrostatic
-    !equilibrium
+    !! First calculate the vertical height (m) assuming hydrostatic equilibrium
     alte(nlev) = 0.0_dp
     do k = nlev-1, 1, -1
       alte(k) = alte(k+1) + (Rd_air(k)*Tl(k))/grav * log(pe(k+1)/pe(k))
     end do
 
-    !! Now reverse alte, Kzz, Kzz_e and q so indexing starts at 1->nlay
-    !from 0 altitude
+    !! Now reverse alte, Kzz, Kzz_e and q so indexing starts at 1->nlay from 0 altitude
     do k = 1, nlev
       alte_r(k) = alte(nlev-k+1)
       Kzz_er(k) = Kzz_e(nlev-k+1)
@@ -104,7 +102,7 @@ contains
     t_now = 0.0_dp
     n_it = 1
 
-    do while ((t_now < t_end) .and. (n_it < 10000))
+    do while ((t_now < t_end) .and. (n_it < 100000))
 
       !! If next time step overshoots - last time step is equal tend
       if ((t_now + dt) > t_end) then

@@ -15,8 +15,10 @@ qic = data1[:,4:]
 data2 = np.loadtxt('FMS_RC_pp_1.out',skiprows=1)
 Ppp = data2[:,1]
 Tpp = data2[:,2]
-mupp = data2[:,3]
-qpp = data2[:,4:] 
+dTrad = data1[:,3]
+dTconv = data1[:,4]
+mupp = data2[:,5]
+qpp = data2[:,6:] 
 
 
 fig = plt.figure()
@@ -29,6 +31,20 @@ plt.xlabel('Temperature [K]')
 plt.legend()
 
 plt.yscale('log')
+plt.gca().invert_yaxis()
+
+
+fig = plt.figure()
+
+plt.plot(dTrad,Ppp/1e5,ls='dashed',lw=3,label='dT rad',c='orange')
+plt.plot(dTconv,Ppp/1e5,lw=3,label='dT conv',c='blue')
+
+plt.ylabel('Pressure [bar]')
+plt.xlabel('dT [K s-1]')
+plt.legend()
+
+plt.yscale('log')
+plt.xscale('log')
 plt.gca().invert_yaxis()
 
 fig = plt.figure()

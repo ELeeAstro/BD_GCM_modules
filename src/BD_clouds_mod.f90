@@ -8,12 +8,12 @@ module BD_clouds_mod
   real(dp), parameter :: t_grow = 150.0_dp
   real(dp), parameter :: t_evap = 150.0_dp
 
-  real(dp), parameter :: reff = 5.0_dp * 1e-4_dp
-  real(dp), parameter :: rm = 1.504_dp * 1e-4_dp
-  real(dp), parameter :: rV = 8.084_dp * 1e-4_dp
+  real(dp), parameter :: reff = 6.65_dp * 1e-4_dp
+  real(dp), parameter :: rm = 2.0_dp * 1e-4_dp
+  real(dp), parameter :: rV = 10.75_dp * 1e-4_dp
   real(dp), parameter :: sigma = 2.0_dp
   
-  real(dp), parameter :: mol_w_sp = 140.6931_dp 
+  real(dp), parameter :: mol_w_sp = 100.3887_dp 
 
   real(dp), parameter :: bar = 1.0e5_dp ! bar to pa
   real(dp), parameter :: atm = 1.01325e5_dp ! atm to pa
@@ -25,8 +25,6 @@ module BD_clouds_mod
   real(dp), parameter :: kb = 1.380649e-16_dp
   real(dp), parameter :: amu = 1.66053906660e-24_dp ! g mol-1 (note, has to be cgs g mol-1 !!!)
   real(dp), parameter :: R = 8.31446261815324_dp
-
-  real(dp), parameter :: cfl = 0.95_dp
 
   !! Diameter, LJ potential and molecular weight for background gases ! Do everything in cgs for vf calculation
   real(dp), parameter :: d_OH = 3.06e-8_dp, LJ_OH = 100.0_dp * kb, molg_OH = 17.00734_dp  ! estimate
@@ -44,16 +42,150 @@ module BD_clouds_mod
   real(dp), parameter :: d_He = 2.511e-8_dp, LJ_He = 10.22_dp * kb, molg_He = 4.002602_dp
 
 
-  integer :: ir, iwl
-  real(dp),  allocatable, dimension(:) :: wl_lr, rad_lr, nd_lr
+  integer :: ir, iwl, iT
+  real(dp),  allocatable, dimension(:) :: wl_lr, rad_lr, nd_lr, nd_lr_norm
   real(dp),  allocatable, dimension(:,:) :: kext_lr, a_lr, g_lr, kext_lrN
-  real(dp),  allocatable, dimension(:) :: kext_ln, a_ln, g_ln
+  real(dp),  allocatable, dimension(:) :: kext_ln, a_ln, g_ln, T_Ross
+  real(dp), allocatable, dimension(:,:) :: Qext_Ross, Qsca_Ross, gg_Ross
+  real(dp), allocatable, dimension(:) :: iQext, iQsca, igg, ifunc_k, ifunc_a, ifunc_g
   logical :: first_call = .True.
 
-  public :: BD_clouds_chem, BD_clouds_vf, BD_clouds_adv
-  private :: p_vap_sp, minmod, first_call
+  public :: BD_clouds_chem, BD_clouds_vf, BD_clouds_Ross_opac
+  private :: p_vap_sp, first_call, locate, trapz
 
 contains 
+
+  subroutine BD_clouds_Ross_opac(nlay,sp,Rd_air,pl_in,Tl,qc,k_ext_cld,a_cld,g_cld)
+    implicit none
+
+    integer, intent(in) :: nlay
+    character(len=10), intent(in) :: sp
+    real(dp), dimension(nlay), intent(in) :: qc, Rd_air, pl_in, Tl
+
+    real(dp), dimension(nlay), intent(out) :: k_ext_cld, a_cld, g_cld
+
+    integer :: k, r, iT1, iT2
+    real(dp), dimension(nlay) :: pl
+    real(dp) :: rho, mu, mu_ratio, expterm, N0
+
+    if (first_call .eqv. .True.) then
+      call read_Ross_table(sp)
+      first_call = .False.
+      allocate(iQext(ir),iQsca(ir),igg(ir),ifunc_k(ir), ifunc_a(ir), ifunc_g(ir))
+    end if
+
+    pl(:) = pl_in(:) * 10.0_dp ! Convert Pa to Dyne
+
+    do k = 1, nlay
+
+      if (qc(k) < 1.0e-10) then
+        k_ext_cld(k) = 1.0e-30_dp
+        a_cld(k) = 1.0e-30_dp
+        g_cld(k) = 1.0e-30_dp 
+        cycle
+      end if
+
+      mu = R/Rd_air(k) * 1000.0_dp
+
+      rho = (pl(k) * mu * amu)/ (kb * Tl(k)) ! g cm-3
+
+      mu_ratio = mol_w_sp/mu
+
+      expterm = exp(-9.0_dp/2.0_dp * log(sigma)**2)
+
+      N0 = (3.0_dp*qc(k)*mu_ratio*rho)/(4.0_dp*pi*rho_c*rm**3) * expterm ! cm-3
+
+      ! Find number density for each size and calculate kappa
+      do r = 1, ir
+        nd_lr(r) = (N0  / (rad_lr(r) * sqrt(twopi) * log(sigma))) * &
+          & exp(-(log(rad_lr(r)/rm))**2/(2.0_dp * log(sigma)**2))
+        nd_lr_norm(r) = nd_lr(r)/N0
+      end do
+      
+      ! Interpolate tables to find Rosseland mean weighted values at the layer temperature
+      if (Tl(k) <= T_Ross(1)) then
+        iT1 = 1 
+        iT2 = iT1 + 1
+      else if (Tl(k) >= T_Ross(iT)) then
+        iT1 = iT - 1
+        iT2 = iT
+      else
+        call locate(T_Ross(:), iT, Tl(k), iT1)
+        iT2 = iT1 + 1
+      end if
+
+      do r = 1, ir
+        call linear_interp(Tl(k), T_Ross(iT1), T_Ross(iT2), Qext_Ross(r,iT1), Qext_Ross(r,iT2), iQext(r))
+        call linear_interp(Tl(k), T_Ross(iT1), T_Ross(iT2), Qsca_Ross(r,iT1), Qsca_Ross(r,iT2), iQsca(r))
+        call linear_interp(Tl(k), T_Ross(iT1), T_Ross(iT2), gg_Ross(r,iT1), gg_Ross(r,iT2), igg(r))
+      end do
+
+      !! Calculate weighted opacity values
+      do r = 1, ir
+        ifunc_k(r) = iQext(r) *  pi * rad_lr(r)**2 * nd_lr(r)
+        ifunc_a(r) = iQsca(r)/iQext(r)
+        ifunc_g(r) = igg(r)
+      end do
+
+
+      ! Use trapezoid rule - function in [cm-3 cm-1]
+      ! Total extinction = integral over all sizes
+      k_ext_cld(k) = trapz(rad_lr(:),ifunc_k(:))
+      ! effective SSA = integral for k_sca / k_ext =  integral(k_ext * a) / k_ext
+      a_cld(k) = trapz(rad_lr(:),ifunc_k(:) * ifunc_a(:)) ! Store intermediate result for cl_out_g
+      ! effective g = itergral for k_sca * g / k_sca = integeral(k_sca * g) / k_sca
+      g_cld(k) = trapz(rad_lr(:),ifunc_k(:) * ifunc_a(:) * ifunc_g(:))/a_cld(k)
+
+      a_cld(k) = a_cld(k)/ k_ext_cld(k) ! Albedo is scattering/extinction
+
+      k_ext_cld(k) = k_ext_cld(k)/rho/10.0_dp
+ 
+    end do
+
+
+  end subroutine BD_clouds_Ross_opac
+
+  subroutine read_Ross_table(sp)
+    implicit none
+    
+    character(len=10), intent(in) :: sp
+
+    integer :: u, r
+
+    open(newunit=u,file='cloud_data/RTtable.txt',action='read')
+    read(u,*) ir, iT
+    allocate(rad_lr(ir),nd_lr(ir),nd_lr_norm(ir),T_Ross(iT))
+    read(u,*) rad_lr(:) 
+    rad_lr(:) = rad_lr(:) * 1.0e-4_dp
+    read(u,*) T_Ross(:)
+    close(u)
+
+    open(newunit=u,file='cloud_data/'//trim(sp)//'_rosselandMean_qext.txt',action='read')
+    read(u,*)
+    allocate(Qext_Ross(ir,iT))
+    do r = 1, ir
+      read(u,*) Qext_Ross(r,:)
+    end do
+    close(u)
+
+    open(newunit=u,file='cloud_data/'//trim(sp)//'_rosselandMean_qscat.txt',action='read')
+    read(u,*)
+    allocate(Qsca_Ross(ir,iT))
+    do r = 1, ir
+      read(u,*) Qsca_Ross(r,:)
+    end do
+    close(u)
+
+   
+    open(newunit=u,file='cloud_data/'//trim(sp)//'_rosselandMean_gg.txt',action='read')
+    read(u,*)
+    allocate(gg_Ross(ir,iT))
+    do r = 1, ir
+      read(u,*) gg_Ross(r,:)
+    end do
+    close(u)
+
+  end subroutine read_Ross_table
 
   subroutine BD_clouds_vf(nlay, nq, Rd_air, grav_in, q_VMR, pl_in, Tl, qc, vf)
     implicit none
@@ -130,21 +262,21 @@ contains
       vf(k) = -(2.0_dp * beta * rV**2 * grav * (rho_c - rho)) / (9.0_dp * nu_mix)
 
       !! Convert to pressure coordinates (dyne s-1)
-      vf(k) = - rho * grav * vf(k)
+      !vf(k) = - rho * grav * vf(k)
       
     end do
 
     !! Convert to Pa s-1
-    vf(:) = vf(:) / 10.0_dp
+    !vf(:) = vf(:) / 10.0_dp
 
   end subroutine BD_clouds_vf
 
-  subroutine BD_clouds_chem(nlay, t_step, sp, q_v, q_c, pl, Tl, Rd_air, Kzz, q0, grav, sat)
+  subroutine BD_clouds_chem(nlay, t_end, sp, q_v, q_c, pl, Tl, Rd_air, Kzz, q0, grav, sat)
     implicit none
 
     integer, intent(in) :: nlay
     character(len=10), intent(in) :: sp
-    real(dp), intent(in) :: t_step, q0, grav
+    real(dp), intent(in) :: t_end, q0, grav
     real(dp), dimension(nlay), intent(in) :: pl, Tl, Rd_air, Kzz
     
     real(dp), dimension(nlay), intent(inout) :: q_v, q_c, sat
@@ -153,67 +285,85 @@ contains
     real(dp) :: s, p_vap,  q_s, dqvdt, dqcdt, t_c, tau_deep, Hp
     real(dp) :: k1v, k2v, k3v, k4v,  k1c, k2c, k3c, k4c
 
-    !! Calculate stability coefficent and change in vapour/cloud mass
-    !fractions
-    do k = 1, nlay
+    real(dp) :: t_now, dt
+    real(dp), parameter  :: dt_max = 1.0_dp
 
-      !! Vapour pressure and saturation vapour pressure
-      p_vap = p_vap_sp(sp, Tl(k))
-      sat(k) = (q_v(k) * pl(k))/p_vap
+    !! Loop over time until we reach t_end
+    t_now = 0.0_dp
+    do while (t_now < t_end)
 
-      !! Give stability coefficent
-      if (sat(k) < 0.9999_dp) then
-        ! Evaporate the cloud mass portion
-        s = 0.0_dp
-        t_c = t_evap
-      else if (sat(k) > 1.0001_dp) then
-        ! Condense the cloud vapour portion
-        s = 1.0_dp
-        t_c = t_grow
+      !! Calculate the timestep
+      if ((t_now + dt_max) > t_end) then
+        dt = t_end - t_now
       else
-        ! Don't do anything if at saturation
-        cycle
+        dt = dt_max
       end if
 
-      !! Equilibrium (sat = 1) vapour pressure fraction
-      q_s = max(1.0e-30_dp,p_vap/pl(k))
-      q_s = min(1.0_dp, q_s)
+      !! Calculate stability coefficent and change in vapour/cloud mass fractions
+      do k = 1, nlay
 
-      !! Calculate tracer tendencies
-      if (k == nlay) then
-        !! Include lower boundary replenishment rate at tau_deep relaxtion timescale
-        Hp = (Rd_air(k) * Tl(k)) / grav
-        tau_deep = Hp**2/Kzz(k)
-        dqvdt = (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c  &
-          & - s*(q_v(k) - q_s)/t_c - (q_v(k) - q0)/tau_deep
-      else
-        !! Calculate qv tracer tendency
-        dqvdt = (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c  &
-          & - s*(q_v(k) - q_s)/t_c
-      end if
+        !! Vapour pressure and saturation vapour pressure
+        p_vap = p_vap_sp(sp, Tl(k))
+        sat(k) = (q_v(k) * pl(k))/p_vap
 
-      !! Calculate qc tracer tendency
-      dqcdt = s*(q_v(k) - q_s)/t_c  & 
-        & - (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c
+        !! Give stability coefficent
+        if (sat(k) < 0.9999_dp) then
+          ! Evaporate the cloud mass portion
+          s = 0.0_dp
+          t_c = t_evap
+        else if (sat(k) > 1.0001_dp) then
+          ! Condense the cloud vapour portion
+          s = 1.0_dp
+          t_c = t_grow
+        else
+          ! Don't do anything if at saturation
+          cycle
+        end if
+
+        !! Equilibrium (sat = 1) vapour pressure fraction
+        q_s = max(1.0e-30_dp,p_vap/pl(k))
+        q_s = min(1.0_dp, q_s)
+
+        !! Calculate tracer tendencies
+        if (k == nlay) then
+          !! Include lower boundary replenishment rate at tau_deep relaxtion timescale
+          Hp = (Rd_air(k) * Tl(k)) / grav
+          tau_deep = Hp**2/Kzz(k)
+          dqvdt = (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c  &
+            & - s*(q_v(k) - q_s)/t_c - (q_v(k) - q0)/tau_deep
+        else
+          !! Calculate qv tracer tendency
+          dqvdt = (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c  &
+            & - s*(q_v(k) - q_s)/t_c
+        end if
+
+        !! Calculate qc tracer tendency
+        dqcdt = s*(q_v(k) - q_s)/t_c  & 
+          & - (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c
 
 
-      !! Timestep vapour and cloud tracer values
-      !! check if integration would go negative for vapour and give
-      !limits
-      if ((q_v(k) + dqvdt * t_step) <= 0.0_dp) then
-        q_v(k) = 1e-30_dp
-      else
-        q_v(k) = q_v(k) + dqvdt * t_step
-      end if
-      if ((q_c(k) + dqcdt * t_step) <= 0.0_dp) then
-        q_c(k) = 1e-30_dp
-      else
-        q_c(k) = q_c(k) + dqcdt * t_step
-      end if
+        !! Timestep vapour and cloud tracer values
+        !! check if integration would go negative for vapour and give
+        !limits
+        if ((q_v(k) + dqvdt * dt) <= 0.0_dp) then
+          q_v(k) = 1e-30_dp
+        else
+          q_v(k) = q_v(k) + dqvdt * dt
+        end if
+        if ((q_c(k) + dqcdt * dt) <= 0.0_dp) then
+          q_c(k) = 1e-30_dp
+        else
+          q_c(k) = q_c(k) + dqcdt * dt
+        end if
 
-      !! Add limiter to 1
-      q_v(k) = min(1.0_dp,q_v(k))
-      q_c(k) = min(1.0_dp,q_c(k))   
+        !! Add limiter to 1
+        q_v(k) = min(1.0_dp,q_v(k))
+        q_c(k) = min(1.0_dp,q_c(k))   
+
+      end do
+
+      !! Add dt to the time
+      t_now = t_now + dt
 
     end do
 
@@ -343,101 +493,58 @@ contains
 
   end function p_vap_sp
 
-  subroutine BD_clouds_adv(nlay, nq, tend, q, vf, delp)
+  subroutine locate(arr, n, var, idx)
     implicit none
 
-    integer, intent(in) :: nlay, nq
-    real(dp), dimension(nlay,nq), intent(inout) :: q
-    real(dp), dimension(nlay), intent(in) :: vf, delp
-    real(dp), intent(in) :: tend
+    integer, intent(in) :: n
+    integer, intent(out) :: idx
+    real(dp), dimension(n), intent(in) :: arr
+    real(dp), intent(in) ::  var
+    integer :: jl, jm, ju
 
-    real(dp), dimension(nlay) :: qc
-    real(dp), dimension(nlay) :: sig, c, vf_c
-    real(dp) :: D, tnow, dt
-    integer :: i, iit, n
+    ! Search an array using bi-section (numerical methods)
+    ! Then return array index that is lower than var in arr
 
-    vf_c(:) = vf(:)
-
-    dt = tend
-    do i = 1, nlay
-      dt = min(dt,cfl*(delp(i))/abs(vf_c(i)))
-    enddo
-
-    tnow = 0.0_dp
-    iit = 1
-
-    do while ((tnow < tend) .and. (iit < 10000))
-
-      ! If next time step overshoots - last time step is equal tend
-      if (tnow + dt > tend) then
-        dt = tend - tnow
-      end if
-
-      !! Find the courant number
-      c(:) = abs(vf_c(:)) * dt / delp(:)
-
-      do n = 1, nq
-
-        ! Apply boundary conditions
-        q(1,n) = 1e-30_dp
-        q(nlay,n) = 1e-30_dp
-
-        q(:,n) = max(q(:,n),1e-30_dp)
-
-        !! Find the minmod limiter
-        call minmod(nlay,q(:,n),delp,sig)
-
-        !! Perform McCormack step
-        qc(:) = q(:,n)
-        qc(1:nlay-1) = q(1:nlay-1,n) - sig(1:nlay-1)*c(1:nlay-1)*(q(2:nlay,n) - q(1:nlay-1,n))
-        q(2:nlay,n) = 0.5_dp * (q(2:nlay,n) + qc(2:nlay) - c(2:nlay)*(qc(2:nlay) - qc(1:nlay-1)))
-
-        q(:,n) = max(q(:,n),1e-30_dp)
-
-        ! Apply boundary conditions
-        q(1,n) = 1e-30_dp
-        q(nlay,n) = 1e-30_dp
-
-      end do
-
-      tnow = tnow + dt
-      iit = iit + 1
-
-    end do
-
-    ! Apply boundary conditions
-    q(1,:) = 1e-30_dp
-    q(nlay,:) = 1e-30_dp
-
-  end subroutine BD_clouds_adv
-
-
-  subroutine minmod(nlay,q,dz,sig)
-    implicit none
-
-    integer, intent(in) :: nlay
-    real(dp), dimension(nlay), intent(in) :: q, dz
-
-    real(dp), dimension(nlay), intent(out) :: sig
-
-    integer :: i
-    real(dp) :: de_minus, de_plus
-
-    sig(1) = 0.0_dp
-    do i = 2, nlay-1
-      de_minus = (q(i) - q(i-1)) / dz(i)
-      de_plus = (q(i+1) - q(i)) / dz(i)
-      if ((de_minus > 0.0_dp) .and. (de_plus > 0.0_dp)) then
-        sig(i) = min(de_minus, de_plus)
-      else if ((de_minus < 0.0_dp) .and. (de_plus < 0.0_dp)) then
-        sig(i) = max(de_minus, de_plus)
+    jl = 0
+    ju = n+1
+    do while (ju-jl > 1)
+      jm = (ju+jl)/2
+      if ((arr(n) > arr(1)).eqv.(var > arr(jm))) then
+        jl=jm
       else
-        sig(i) = 0.0_dp
+        ju=jm
       end if
     end do
-    sig(nlay) = 0.0_dp
 
-  end subroutine minmod
+    idx = jl
+
+  end subroutine locate
+
+  subroutine linear_interp(xval, x1, x2, y1, y2, yval)
+    implicit none
+
+    real(dp), intent(in) :: xval, y1, y2, x1, x2
+    real(dp), intent(out) :: yval
+    real(dp) :: norm
+
+    norm = 1.0_dp / (x2 - x1)
+
+    yval = (y1 * (x2 - xval) + y2 * (xval - x1)) * norm
+
+  end subroutine linear_interp
+
+  pure function trapz(x, y) result(r)
+      !! Calculates the integral of an array y with respect to x using the trapezoid
+      !! approximation. Note that the mesh spacing of x does not have to be uniform.
+      real(kind=dp), intent(in)  :: x(:)         !! Variable x
+      real(kind=dp), intent(in)  :: y(size(x))   !! Function y(x)
+      real(kind=dp)              :: r            !! Integral ∫y(x)·dx
+
+      ! Integrate using the trapezoidal rule
+      associate(n => size(x))
+        r = sum((y(1+1:n-0) + y(1+0:n-1))*(x(1+1:n-0) - x(1+0:n-1)))/2.0_dp
+      end associate
+    end function trapz
 
 end module BD_clouds_mod
 

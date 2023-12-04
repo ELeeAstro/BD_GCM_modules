@@ -11,8 +11,10 @@ program FMS_BD_RC
   use mini_ch_read_reac_list, only : read_react_list
   use BD_kappa_poly_mod, only : calc_kappa
   use BD_MLT_mod, only : BD_MLT
-  use BD_clouds_mod, only : BD_clouds_chem, BD_clouds_vf, BD_clouds_adv
+  use BD_clouds_mod, only : BD_clouds_chem, BD_clouds_vf, BD_clouds_Ross_opac
+  use BD_clouds_adv_mod, only : BD_clouds_adv
   use BD_vert_diff_mod, only: BD_vert_diff
+  use dry_conv_adj_mod, only :  Ray_dry_adj
   use ts_Toon_scatter_mod, only : ts_Toon_scatter
   use ieee_arithmetic
   implicit none
@@ -80,6 +82,7 @@ program FMS_BD_RC
   integer :: ncld
   character(len=10), allocatable, dimension(:) :: cld_sp
   real(dp), allocatable, dimension(:) :: q0_cld
+  real(dp), allocatable, dimension(:) :: k_ext_cld, a_cld, g_cld
 
 
 
@@ -152,6 +155,8 @@ program FMS_BD_RC
   allocate(Tl(nlay), dT_rad(nlay), dT_conv(nlay), net_F(nlev))
   allocate(tau_IRe(nlev), k_IRl(nlay))
   allocate(Kzz(nlay), mu(nlay), w_osh(nlay), Rd_bar(nlay), cp_bar(nlay), k_prime(nlay))
+  allocate(k_ext_cld(nlay), a_cld(nlay), g_cld(nlay))
+
   Kzz(:) = 1e1_dp
 
   !! shortwave arrays (not needed here yet)
@@ -285,7 +290,7 @@ program FMS_BD_RC
     case('Tracer')
       call BD_clouds_chem(nlay, t_step, cld_sp(1), q(:,nsp+1), q(:,nsp+2), pl, Tl, Rd_bar, Kzz, q0_cld(1), grav, sat)
       call BD_clouds_vf(nlay, nsp, Rd_bar, grav, q(:,1:nsp), pl, Tl, q(:,nsp+2), vf)
-      call BD_clouds_adv(nlay, 1, t_step, q(:,nsp+2), vf, dpe)
+      call BD_clouds_adv(nlay, nlev, Rd_bar, grav, Tl, pe, 1, t_step, q(:,nsp+2), vf)
     case('None')
     case default
       print*, 'Invalid cloud_scheme: ', trim(cloud_chem_scheme)
@@ -297,7 +302,12 @@ program FMS_BD_RC
     case('MLT')
       ! Mixing length theory
       call BD_MLT(nlay, nlev, t_step, Tl, pl, pe, Rd_bar, cp_bar, k_prime, &
-         & grav, dT_conv, Kzz, w_osh)
+        & grav, dT_conv, Kzz, w_osh)
+    case('Dry')
+      ! Dry convective adjustment - must use constant kappa!!! 
+      call Ray_dry_adj(nlay, nlev, t_step, kappa_air, Tl, pl, pe, dT_conv)
+      Kzz(:) = 1e1_dp
+      w_osh(:) = 0.0_dp
     case('None')
       dT_conv(:) = 0.0_dp
     case default
@@ -335,13 +345,22 @@ program FMS_BD_RC
 
     select case(cloud_opac_scheme)
     case('Rosseland')
-
+      call BD_clouds_Ross_opac(nlay, cld_sp(1), Rd_bar, pl, Tl, q(:,nsp+2), k_ext_cld, a_cld, g_cld)
+      lw_a(:) = (k_ext_cld(:) * a_cld(:)) / (k_IRl(:) + k_ext_cld(:))
+      lw_g(:) = (k_ext_cld(:) * a_cld(:) * g_cld(:))/(k_ext_cld(:) * a_cld(:))
+      k_IRl(:) = (k_IRl(:) + k_ext_cld(:))
+      tau_IRe(1) = (k_IRl(1) * pe(1)) / grav
+      do k = 1, nlay
+        tau_IRe(k+1) = tau_IRe(k) + (k_IRl(k) * dpe(k)) / grav
+       print*, k, k_ext_cld(k), lw_a(k), lw_g(k), tau_IRe(k+1), q(k,nsp+2)
+      end do
     case('None')
-
+      k_ext_cld(:) = 0.0_dp
+      a_cld(:) = 0.0_dp
+      g_cld(:) = 0.0_dp
     case default
       print*,'Invalid cloud opacity scheme: ', cloud_opac_scheme
     end select 
-
 
     !! Two stream radiative transfer step
     select case(ts_scheme)
@@ -409,7 +428,7 @@ program FMS_BD_RC
   open(newunit=u,file='FMS_RC_pp_1.out', action='readwrite')
   write(u,*) nlay, nsp, ncld 
   do k = 1, nlay
-    write(u,*) k, pl(k), Tl(k), mu(k), q(k,:)
+    write(u,*) k, pl(k), Tl(k), dT_rad(k), dT_conv(k), mu(k), q(k,:)
   end do
   close(u)
 

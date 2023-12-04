@@ -38,6 +38,8 @@ OBJECTS = \
 		BD_MLT_mod.o \
 		BD_clouds_mod.o \
     BD_ver_diff_mod.o \
+		BD_clouds_adv_mod.o \
+		dry_conv_adj_mod.o \
 		CE_mod.o \
 		dc_decsol.o \
 		decsol.o \
