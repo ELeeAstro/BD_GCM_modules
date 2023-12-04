@@ -26,14 +26,14 @@ contains
 
     integer :: k
     real(dp) :: h1, h2, d1Kzz
-    real(dp), dimension(nlev) :: alte, alte_r, lpe, Kzz_e, Kzz_er, Te, nde, nde_r
-    real(dp), dimension(nlay) :: dh
+    real(dp), dimension(nlev) :: alte, lpe, Kzz_e, Te, nde
+    real(dp), dimension(nlay) :: delz, delz_mid
 
-    real(dp), dimension(nlay) :: lKzz, Kzz_r, lpl, lTl, nd, nd_r
-    real(dp), dimension(nlay,nq) :: q_r, flx
+    real(dp), dimension(nlay) :: lKzz, lpl, lTl, nd
+    real(dp), dimension(nlay,nq) :: flx
     real(dp), dimension(nq) :: phi_jp, phi_jm
 
-    integer :: n_it
+    integer :: n_it, n
     real(dp) :: dt, t_now
 
     !! First interpolate Kzz at the layer to Kzz at the edges
@@ -66,36 +66,25 @@ contains
     nd(:) = pl(:)/(kb * Tl(:))
     nde(:) = pe(:)/(kb * Te(:)) 
 
-    !! First calculate the vertical height (m) assuming hydrostatic equilibrium
+    !! First calculate the vertical height (m) assuming hydrostatic equilibrium and differences
     alte(nlev) = 0.0_dp
     do k = nlev-1, 1, -1
       alte(k) = alte(k+1) + (Rd_air(k)*Tl(k))/grav * log(pe(k+1)/pe(k))
+      delz(k) = alte(k) - alte(k+1)
     end do
 
-    !! Now reverse alte, Kzz, Kzz_e and q so indexing starts at 1->nlay from 0 altitude
-    do k = 1, nlev
-      alte_r(k) = alte(nlev-k+1)
-      Kzz_er(k) = Kzz_e(nlev-k+1)
-      nde_r(k) = nde(nlev-k+1)
+    !! Find differences between layers directly
+    do k = nlay, 2, -1
+      delz_mid(k) = (alte(k-1) + alte(k))/2.0_dp - (alte(k) + alte(k+1))/2.0_dp
     end do
-    do k = 1, nlay
-      Kzz_r(k) = Kzz(nlay-k+1)
-      q_r(k,:) = q(nlay-k+1,:)
-      nd_r(k) = nd(nlay-k+1)
-    end do
-
+    
     !! We now follow the 1st order VULCAN scheme
-
-    !! Altitude differences
-    do k = 1, nlay
-      dh(k) = alte_r(k+1) - alte_r(k)
-    enddo
 
     !! Prepare timestepping routine
     !! Find minimum timestep that satifies the CFL condition
     dt = t_end
     do k = 1, nlay
-      dt = min(dt,CFL*(alte_r(k+1)-alte_r(k))**2/Kzz_r(k))
+      dt = min(dt,CFL*(delz(k))**2/Kzz(k))
     end do
 
     !! Begin timestepping routine
@@ -110,26 +99,25 @@ contains
       end if
 
       !! Apply tracer lower boundary conditions
-      q_r(1,:) = q0(:)
-      q_r(nlay,:) = q_r(nlay-1,:)
+      q(nlay,:) = q0(:)
+      q(1,:) = q(2,:)
 
+      do n = 1, nq
+        q(:,n) = max(q(:,n),1e-30_dp)
+      end do
 
       !! Find flux between layers
       do k = 2, nlay-1
-        phi_jp(:) = -Kzz_er(k+1) * nde_r(k+1) * (q_r(k+1,:) - q_r(k,:))/dh(k)
-        phi_jm(:) = -Kzz_er(k) * nde_r(k) * (q_r(k,:) - q_r(k-1,:))/dh(k)
-        flx(k,:) = -(phi_jp(:) - phi_jm(:))/dh(k)
+        phi_jp(:) = -Kzz_e(k) * nde(k) * (q(k-1,:) - q(k,:))/delz_mid(k)
+        phi_jm(:) = -Kzz_e(k+1) * nde(k+1) * (q(k,:) - q(k+1,:))/delz_mid(k)
+        flx(k,:) = -(phi_jp(:) - phi_jm(:))/delz(k)
         !print*, k,   phi_jp(:),  phi_jm(:), flx(k,:), dh(k)
       end do
 
       !! Perform tracer timestepping
       do k = 2, nlay-1
-        q_r(k,:) = q_r(k,:) + flx(k,:)/nd_r(k)*dt
+        q(k,:) = q(k,:) + flx(k,:)/nd(k)*dt
       end do
-
-      !! Apply tracer lower boundary conditions
-      q_r(1,:) = q0(:)
-      q_r(nlay,:) = q_r(nlay-1,:)
 
       !! Increment time and iteration number
       t_now = t_now + dt
@@ -137,10 +125,14 @@ contains
 
     end do
 
-    !! Reverse q_r and pass back to q
-    do k = 1, nlay
-      q(k,:) = q_r(nlay-k+1,:)
+    ! Apply boundary conditions
+    q(1,:) = q(2,:)
+    q(nlay,:) = q0(:)
+
+    do n = 1, nq
+      q(:,n) = max(q(:,n),1e-30_dp)
     end do
+
 
   end subroutine BD_vert_diff
 

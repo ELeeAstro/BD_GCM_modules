@@ -71,17 +71,15 @@
         qc(1:nlay-1) = q(1:nlay-1,n) - sig(1:nlay-1)*c(1:nlay-1)*(q(2:nlay,n) - q(1:nlay-1,n))
         q(2:nlay,n) = 0.5_dp * (q(2:nlay,n) + qc(2:nlay) - c(2:nlay)*(qc(2:nlay) - qc(1:nlay-1)))
 
-        q(:,n) = max(q(:,n),1e-30_dp)
-
-        ! Apply boundary conditions
-        q(1,n) = 1e-30_dp
-        q(nlay,n) = 1e-30_dp
-
       end do
 
       tnow = tnow + dt
       iit = iit + 1
 
+    end do
+
+    do n = 1, nq
+      q(:,n) = max(q(:,n),1e-30_dp)
     end do
 
     ! Apply boundary conditions
