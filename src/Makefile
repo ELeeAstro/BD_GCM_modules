@@ -32,6 +32,7 @@ LFLAGS    = $(FFLAGS)
 
 
 OBJECTS = \
+    dopri5.o \
 	  k_Rosseland_mod.o \
 	  IC_mod.o \
 		BD_kappa_poly_mod.o \

@@ -8,12 +8,12 @@ module BD_clouds_mod
   real(dp), parameter :: t_grow = 10.0_dp
   real(dp), parameter :: t_evap = 10.0_dp
 
-  real(dp), parameter :: reff = 6.65_dp * 1e-4_dp
-  real(dp), parameter :: rm = 2.0_dp * 1e-4_dp
-  real(dp), parameter :: rV = 10.75_dp * 1e-4_dp
-  real(dp), parameter :: sigma = 2.0_dp
-  
-  real(dp), parameter :: mol_w_sp = 100.3887_dp 
+  real(dp), parameter :: reff = 0.15_dp * 1e-4_dp
+  real(dp), parameter :: rm = 0.1_dp * 1e-4_dp
+  real(dp), parameter :: rV = 10_dp * 1e-4_dp
+  real(dp), parameter :: sigma = 1.5_dp
+
+  real(dp), parameter :: mol_w_sp = 60.08430_dp
 
   real(dp), parameter :: bar = 1.0e5_dp ! bar to pa
   real(dp), parameter :: atm = 1.01325e5_dp ! atm to pa
@@ -59,7 +59,7 @@ contains
     implicit none
 
     integer, intent(in) :: nlay
-    character(len=10), intent(in) :: sp
+    character(len=20), intent(in) :: sp
     real(dp), dimension(nlay), intent(in) :: qc, Rd_air, pl_in, Tl
 
     real(dp), dimension(nlay), intent(out) :: k_ext_cld, a_cld, g_cld
@@ -148,7 +148,7 @@ contains
   subroutine read_Ross_table(sp)
     implicit none
     
-    character(len=10), intent(in) :: sp
+    character(len=20), intent(in) :: sp
 
     integer :: u, r
 
@@ -223,8 +223,8 @@ contains
 
     do k = 1, nlay
 
-      if (qc(k) < 1e-20_dp) then
-        vf(k) = 0.0_dp
+      if (qc(k) < 1e-30_dp) then
+        vf(k) = -1.0e-10_dp
         cycle
       end if
 
@@ -271,108 +271,160 @@ contains
 
   end subroutine BD_clouds_vf
 
-  subroutine BD_clouds_chem(nlay, t_end, sp, q_v, q_c, pl, Tl, Rd_air, Kzz, q0, grav, sat)
+  subroutine BD_clouds_chem(nlay, t_end, sp, q_v, q_c, pl, Tl, Rd_air, Kzz, q0, grav)
     implicit none
 
     integer, intent(in) :: nlay
-    character(len=10), intent(in) :: sp
+    character(len=20), intent(in) :: sp
     real(dp), intent(in) :: t_end, q0, grav
     real(dp), dimension(nlay), intent(in) :: pl, Tl, Rd_air, Kzz
     
-    real(dp), dimension(nlay), intent(inout) :: q_v, q_c, sat
+    real(dp), dimension(nlay), intent(inout) :: q_v, q_c
 
     integer :: k
-    real(dp) :: s, p_vap,  q_s, dqvdt, dqcdt, t_c, tau_deep, Hp
-    real(dp) :: k1v, k2v, k3v, k4v,  k1c, k2c, k3c, k4c
+    real(dp) :: p_vap, q_s, dqvdt, dqcdt, t_c, tau_deep, Hp
 
-    real(dp) :: t_now, dt
-    real(dp), parameter  :: dt_max = 1.0_dp
+    real(dp) :: t_now, dt, dq, dqc
 
-    !! Loop over time until we reach t_end
-    t_now = 0.0_dp
-    do while (t_now < t_end)
+    integer :: itol, iout, idid
+    integer, dimension(2) :: ipar
+    real(dp) :: rtol, atol
+    real(dp), dimension(5) :: rpar
 
-      !! Calculate the timestep
-      if ((t_now + dt_max) > t_end) then
-        dt = t_end - t_now
-      else
-        dt = dt_max
+    integer, parameter :: n = 2
+    integer, parameter :: lwork = 37 !8*2
+    integer, parameter :: liwork = 21
+    real(dp), dimension(lwork) :: work
+    integer, dimension(liwork) :: iwork
+
+    real(dp), dimension(n) :: y
+
+    itol = 0
+    rtol = 1e-4_dp
+    atol = 1e-30_dp
+
+    iout = 0
+
+    ! Calculate 
+    Hp = (Rd_air(nlay) * Tl(nlay)) / grav
+    tau_deep = Hp**2/Kzz(nlay)
+
+    do k = 1, nlay
+
+      !! Vapour pressure and saturation vapour pressure
+      p_vap = p_vap_sp(sp, Tl(k))
+
+      !! Equilibrium (sat = 1) vapour pressure fraction
+      q_s = min(1.0_dp, p_vap/pl(k))
+
+
+      t_now = 0.0_dp
+
+      y(1) = q_v(k)
+      y(2) = q_c(k)
+
+      ipar(1) = k
+      ipar(2) = nlay
+
+      !! Set rpar to send through variables into dopri5 to calculate dqdt
+      rpar(1) = pl(k)
+      rpar(2) = p_vap
+      rpar(3) = q_s
+      rpar(4) = q0
+      rpar(5) = tau_deep
+
+
+      work(:) = 0.0_dp
+      iwork(:) = 0
+
+      call dopri5(n,dqdt,t_now,y,t_end, &
+        &         rtol,atol,itol, &
+        &         solout,iout, &
+        &         work,lwork,iwork,liwork,rpar,ipar,idid)
+
+      q_v(k) = y(1)
+      q_c(k) = y(2)
+
+      if (idid /= 1) then
+        print*, k, idid
       end if
-
-      !! Calculate stability coefficent and change in vapour/cloud mass fractions
-      do k = 1, nlay
-
-        !! Vapour pressure and saturation vapour pressure
-        p_vap = p_vap_sp(sp, Tl(k))
-        sat(k) = (q_v(k) * pl(k))/p_vap
-
-        !! Give stability coefficent
-        if (sat(k) < 0.9999_dp) then
-          ! Evaporate the cloud mass portion
-          s = 0.0_dp
-          t_c = t_evap
-        else if (sat(k) > 1.0001_dp) then
-          ! Condense the cloud vapour portion
-          s = 1.0_dp
-          t_c = t_grow
-        else
-          ! Don't do anything if at saturation
-          cycle
-        end if
-
-        !! Equilibrium (sat = 1) vapour pressure fraction
-        q_s = max(1.0e-30_dp,p_vap/pl(k))
-        q_s = min(1.0_dp, q_s)
-
-        !! Calculate tracer tendencies
-        if (k == nlay) then
-          !! Include lower boundary replenishment rate at tau_deep relaxtion timescale
-          Hp = (Rd_air(k) * Tl(k)) / grav
-          tau_deep = Hp**2/Kzz(k)
-          dqvdt = (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c  &
-            & - s*(q_v(k) - q_s)/t_c - (q_v(k) - q0)/tau_deep
-        else
-          !! Calculate qv tracer tendency
-          dqvdt = (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c  &
-            & - s*(q_v(k) - q_s)/t_c
-        end if
-
-        !! Calculate qc tracer tendency
-        dqcdt = s*(q_v(k) - q_s)/t_c  & 
-          & - (1.0_dp - s)*min(q_s - q_v(k), q_c(k))/t_c
-
-
-        !! Timestep vapour and cloud tracer values
-        !! check if integration would go negative for vapour and give
-        !limits
-        if ((q_v(k) + dqvdt * dt) <= 0.0_dp) then
-          q_v(k) = 1e-30_dp
-        else
-          q_v(k) = q_v(k) + dqvdt * dt
-        end if
-        if ((q_c(k) + dqcdt * dt) <= 0.0_dp) then
-          q_c(k) = 1e-30_dp
-        else
-          q_c(k) = q_c(k) + dqcdt * dt
-        end if
-
-        !! Add limiter to 1
-        q_v(k) = min(1.0_dp,q_v(k))
-        q_c(k) = min(1.0_dp,q_c(k))   
-
-      end do
-
-      !! Add dt to the time
-      t_now = t_now + dt
 
     end do
 
   end subroutine BD_clouds_chem
 
+  subroutine dqdt(n,x,y,f,rpar,ipar)
+    implicit none
+
+    integer, intent(in) :: n
+    integer, dimension(*), intent(in) :: ipar
+
+    real(dp), intent(in) :: x 
+    real(dp), dimension(n), intent(inout) :: y
+    real(dp), dimension(*), intent(in) :: rpar
+
+    real(dp), dimension(n), intent(out) :: f
+
+    real(dp) :: sat, t_c
+
+    !y(1) = q_v, y(2) = q_c
+    !rpar(1) = pl(k) , rpar(2) = p_vap, rpar(3) = q_s , rpar(4) = q0 ,  rpar(5) = tau_deep
+
+    y(1) = max(y(1),1e-30_dp)
+    y(2) = max(y(2),1e-30_dp)
+
+    !! Calculate dqdt for vapour and condensate
+    sat = (y(1) * rpar(1))/rpar(2)
+
+    !! Calculate dqdt given the supersaturation ratio
+    if (sat < 0.99_dp) then
+      ! Evaporate the cloud mass portion
+      t_c = t_evap
+
+      if (y(2) < 1e-20_dp) then
+        ! There is not enough q_c to evaporate from
+        f(1) = 0.0_dp    
+      else
+        ! Evaporate from q_c
+        f(1) = min(rpar(3) - y(1), y(2))/t_c
+      end if
+
+    else if (sat > 1.01_dp) then
+      ! Condense the cloud vapour portion
+      t_c = t_grow
+
+      if (y(1) < 1e-20_dp) then
+        ! There is not enough q_v to condense from
+        f(1) = 0.0_dp
+      else
+        ! Condense q_v toward the saturation ratio
+        f(1) = -(y(1) - rpar(3))/t_c
+      end if
+
+    else
+      f(1) = 0.0_dp
+    end if
+
+    f(2) = -f(1)
+
+    ! Add replenishment to lower boundary at the tau_deep rate
+    if (ipar(1) == ipar(2)) then
+      f(1) = f(1) - (y(1) - rpar(4))/rpar(5)
+    end if
+
+  end subroutine dqdt
+
+  subroutine solout(nr,xold,x,y,n,con,icomp,nd,rpar,ipar,irtrn)
+    implicit none
+    integer, intent(in) :: nr, n, nd, irtrn, ipar(*)
+    real(dp), intent(in) ::  Y(*),CON(*),ICOMP(*),RPAR(*), xold, x
+  end subroutine solout
+
+
   real(dp) function p_vap_sp(sp, T)
     implicit none
 
-    character(len=10), intent(in) :: sp
+    character(len=20), intent(in) :: sp
     real(dp), intent(in) :: T
 
     real(dp) :: TC
@@ -381,18 +433,13 @@ contains
     ! Return vapour pressure in pa
     select case(sp)
     case('C')
-      p_vap_sp = exp(3.27860e1_dp - 8.65139e4_dp/(T + 4.80395e-1_dp))
+      p_vap_sp = exp(3.27860e1_dp - 8.65139e4_dp/(T + 4.80395e-1_dp)) * dyne
     !case('TiC')
     !case('SiC')
     !case('CaTiO3')
     case('TiO2')
-      ! NIST 5 param fit
-      p_vap_sp = exp(-7.70443e4_dp/T + 4.03144e1_dp - 2.59140e-3_dp*T &
-      & + 6.02422e-7_dp*T**2 - 6.86899e-11_dp*T**3)
-    case('VO')
-      ! NIST 5 param fit
-      p_vap_sp = exp(-6.74603e4_dp/T + 3.82717e1_dp - 2.78551e-3_dp*T &
-      & + 5.72078e-7_dp*T**2 - 7.41840e-11_dp*T**3)
+      ! Woitke & Helling (2004)
+      p_vap_sp = exp(35.8027_dp - 74734.7_dp/T) * dyne
     case('Al2O3')
       ! Kozasa et al. (1989)
       p_vap_sp = exp(-73503.0_dp/T + 22.01_dp) * atm
@@ -403,28 +450,23 @@ contains
       else
         p_vap_sp = exp(15.71_dp - 47664.0_dp/T) * bar
       end if
-    case('FeO')
-      ! NIST 5 param fit
-      p_vap_sp = exp(-6.30018e4_dp/T + 3.66364e1_dp - 2.42990e-3_dp*T &
-      & + 3.18636e-7_dp*T**2 - 0.0_dp*T**3)
     case('Mg2SiO4')
       ! Kozasa et al. (1989)
       p_vap_sp = exp(-62279_dp/T + 20.944_dp) * atm
-    case('MgSiO3')
-      ! A&M (2001)
+    case('MgSiO3','MgSiO3_amorph')
+      ! Ackerman & Marley (2001)
       p_vap_sp = exp(-58663.0_dp/T + 25.37_dp) * bar
-    case('SiO2')
+    case('SiO2','SiO2_amorph')
       ! NIST 5 param fit
       p_vap_sp = exp(-7.28086e4_dp/T + 3.65312e1_dp - 2.56109e-4_dp*T &
-      & - 5.24980e-7_dp*T**2 + 1.53343E-10_dp*T**3)
+      & - 5.24980e-7_dp*T**2 + 1.53343E-10_dp*T**3) * bar
     case('SiO')
       ! Gail et al. (2013)
-      p_vap_sp = exp(-49520.0_dp/T + 32.52_dp)
+      p_vap_sp = exp(-49520.0_dp/T + 32.52_dp) * dyne
     case('Cr')
-      ! NIST 5 param fit
-      p_vap_sp = exp(-4.78455e4_dp/T + 3.22423e1_dp - 5.28710e-4_dp*T &
-      & - 6.17347e-8_dp*T**2 + 2.88469e-12_dp*T**3)
-    case('MnS')
+      ! Morley et al. (2012)
+      p_vap_sp = 10.0_dp**(7.490_dp - 20592_dp/T) * bar
+     case('MnS')
       ! Morley et al. (2012)
       p_vap_sp = 10.0_dp**(11.532_dp - 23810.0_dp/T) * bar
     case('Na2S')
@@ -434,31 +476,37 @@ contains
       ! Morley et al. (2012)
       p_vap_sp = 10.0_dp**(12.812_dp - 15873.0_dp/T) * bar
     case('KCl')
-      ! NIST 5 param fit
-      p_vap_sp = exp(-2.69250e+4_dp/T + 3.39574e1_dp - 2.04903e-3_dp*T &
-      & - 2.83957e-7_dp*T**2 + 1.82974e-10_dp*T**3)
+      ! Morley et al. (2012)
+      p_vap_sp = 10.0_dp**(7.611_dp - 11382_dp/T) * bar
     case('NaCl')
-      ! NIST 5 param fit
-      p_vap_sp = exp(-2.79146e+4_dp/T + 3.46023e1_dp - 3.11287e-3_dp*T &
-      & + 5.30965e-07_dp*T**2 - 2.59584e-12_dp*T**3)
+      ! Stull (1947)
+      if (T < 83.0_dp) then ! Limiter for very cold T
+        p_vap_sp = 10.0_dp**(5.07184_dp - 8388.497_dp / (83.0_dp - 82.638_dp)) * bar
+      else
+        p_vap_sp = 10.0_dp**(5.07184_dp - 8388.497_dp / (T - 82.638_dp)) * bar
+      end if
     case('NH4Cl')
       p_vap_sp = 10.0_dp**(7.0220_dp - 4302.0_dp/T) * bar
     case('H2O')
-      ! Ackerman & Marley et al. (2001) H2O liquid & ice vapour pressure expressions
+      ! Ackerman & Marley (2001) H2O liquid & ice vapour pressure expressions
       TC = T - 273.15_dp
       if (T > 1048.0_dp) then
-        p_vap_sp = 6.0e8_dp
+        p_vap_sp = 6.0e8_dp * dyne
       else if (T < 273.16_dp) then
-        p_vap_sp = 6111.5_dp * exp((23.036_dp * TC - TC**2/333.7_dp)/(TC + 279.82_dp))
+        p_vap_sp = 6111.5_dp * exp((23.036_dp * TC - TC**2/333.7_dp)/(TC + 279.82_dp)) * dyne
       else
-        p_vap_sp = 6112.1_dp * exp((18.729_dp * TC - TC**2/227.3_dp)/(TC + 257.87_dp))
+        p_vap_sp = 6112.1_dp * exp((18.729_dp * TC - TC**2/227.3_dp)/(TC + 257.87_dp)) * dyne
       end if
     case('NH3')
-      ! Ackerman & Marley et al. (2001) NH3 ice vapour pressure expression from Weast (1971)
+      ! Ackerman & Marley (2001) NH3 ice vapour pressure expression from Weast (1971)
       p_vap_sp = exp(10.53_dp - 2161.0_dp/T - 86596.0_dp/T**2)  * bar
     case('CH4')
       !--- Prydz, R.; Goodwin, R.D., J. Chem. Thermodyn., 1972, 4,1 ---
-      p_vap_sp = 10.0_dp**(3.9895_dp - 443.028_dp/(T-0.49_dp)) * bar
+      if (T < 0.5_dp) then ! Limiter for very very very cold T
+        p_vap_sp = 10.0_dp**(3.9895_dp - 443.028_dp/(0.5_dp-0.49_dp)) * bar       
+      else
+        p_vap_sp = 10.0_dp**(3.9895_dp - 443.028_dp/(T-0.49_dp)) * bar
+      end if
     case('NH4SH')
       !--- E.Lee's fit to Walker & Lumsden (1897) ---
       p_vap_sp = 10.0_dp**(7.8974_dp - 2409.4_dp/T) * bar
@@ -466,8 +514,7 @@ contains
       !--- Stull (1947) ---
       if (T < 30.0_dp) then ! Limiter for very cold T
         p_vap_sp = 10.0_dp**(4.43681_dp - 829.439_dp/(30.0_dp-25.412_dp)) * bar
-      end if
-      if (T < 212.8_dp) then
+      else if (T < 212.8_dp) then
         p_vap_sp = 10.0_dp**(4.43681_dp - 829.439_dp/(T-25.412_dp)) * bar
       else
         p_vap_sp = 10.0_dp**(4.52887_dp - 958.587_dp/(T-0.539_dp)) * bar

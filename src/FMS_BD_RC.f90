@@ -37,7 +37,7 @@ program FMS_BD_RC
 
   real(dp), allocatable, dimension(:) :: lw_a, lw_g
 
-  real(dp), allocatable, dimension(:) :: vf, sat
+  real(dp), allocatable, dimension(:) :: vf
 
   real(dp) :: cp_air, grav, k_IR, kappa_air, Rd_air
   real(dp) :: lw_ac, lw_gc
@@ -80,7 +80,7 @@ program FMS_BD_RC
 
   !! Cloud variables
   integer :: ncld
-  character(len=10), allocatable, dimension(:) :: cld_sp
+  character(len=20), allocatable, dimension(:) :: cld_sp
   real(dp), allocatable, dimension(:) :: q0_cld
   real(dp), allocatable, dimension(:) :: k_ext_cld, a_cld, g_cld
 
@@ -168,7 +168,7 @@ program FMS_BD_RC
   lw_a(:) = lw_ac
   lw_g(:) = lw_gc
 
-  allocate(vf(nlay), sat(nlay))
+  allocate(vf(nlay))
   vf(:) = 1e-30_dp
 
   !! Calculate the adiabatic coefficent
@@ -288,7 +288,7 @@ program FMS_BD_RC
 
     select case(cloud_chem_scheme)
     case('Tracer')
-      call BD_clouds_chem(nlay, t_step, cld_sp(1), q(:,nsp+1), q(:,nsp+2), pl, Tl, Rd_bar, Kzz, q0_cld(1), grav, sat)
+      call BD_clouds_chem(nlay, t_step, cld_sp(1), q(:,nsp+1), q(:,nsp+2), pl, Tl, Rd_bar, Kzz, q0_cld(1), grav)
       call BD_clouds_vf(nlay, nsp, Rd_bar, grav, q(:,1:nsp), pl, Tl, q(:,nsp+2), vf)
       call BD_clouds_adv(nlay, nlev, Rd_bar, grav, Tl, pl, pe, 1, t_step, q(:,nsp+2), vf)
     case('None')
@@ -320,7 +320,7 @@ program FMS_BD_RC
     case('Explicit')
       ! 1st order explicit scheme
       q0(:) = q(nlay,:)
-      call BD_vert_diff(nlay, nlev, t_step, Rd_bar, grav, Tl, pl, pe, Kzz, nq-1, q(:,1:nq-1), q0(1:nq-1))
+      call BD_vert_diff(nlay, nlev, t_step, Rd_bar, grav, Tl, pl, pe, Kzz, nq, q(:,1:nq), q0(1:nq))
     case('None')
     case default
       print*, 'Invalid adj_scheme: ', trim(adj_scheme)
@@ -352,7 +352,7 @@ program FMS_BD_RC
       tau_IRe(1) = (k_IRl(1) * pe(1)) / grav
       do k = 1, nlay
         tau_IRe(k+1) = tau_IRe(k) + (k_IRl(k) * dpe(k)) / grav
-       !print*, k, k_ext_cld(k), lw_a(k), lw_g(k), tau_IRe(k+1), q(k,nsp+2)
+       !print*, k, k_ext_cld(k), lw_a(k), lw_g(k), tau_IRe(k+1), q(k,nsp+1),q(k,nsp+2)
       end do
     case('None')
       k_ext_cld(:) = 0.0_dp

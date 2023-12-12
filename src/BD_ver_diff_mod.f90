@@ -105,7 +105,7 @@ contains
 
       !! Find flux between layers
       do k = 2, nlay-1
-        phi_jp(:) = -Kzz_e(k) * nde(k) * (q(k-1,:) - q(k,:))/delz_mid(k)
+        phi_jp(:) = -Kzz_e(k) * nde(k) * (q(k-1,:) - q(k,:))/delz_mid(k-1)
         phi_jm(:) = -Kzz_e(k+1) * nde(k+1) * (q(k,:) - q(k+1,:))/delz_mid(k)
         flx(k,:) = -(phi_jp(:) - phi_jm(:))/delz(k)
         !print*, k,   phi_jp(:),  phi_jm(:), flx(k,:), dh(k)
