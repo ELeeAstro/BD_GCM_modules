@@ -42,14 +42,12 @@ OBJECTS = \
 		BD_clouds_adv_mod.o \
 		dry_conv_adj_mod.o \
 		CE_mod.o \
-		dc_decsol.o \
-		decsol.o \
-		seulex.o \
+		dlsode.o \
 		mini_ch_precision.o \
 		mini_ch_class.o \
 		mini_ch_read_reac_list.o \
 		mini_ch_chem.o \
-		mini_ch_i_seulex.o \
+		mini_ch_i_dlsode.o \
 	  ts_Toon_scatter_mod.o \
     FMS_BD_RC.o
 

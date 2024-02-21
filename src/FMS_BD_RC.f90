@@ -7,7 +7,7 @@ program FMS_BD_RC
   use k_Rosseland_mod, only : k_Ross_Freedman
   use IC_mod, only : IC_profile
   use CE_mod, only : CE_interpolate_Bezier
-  use mini_ch_i_seulex, only: mini_ch_seulex
+  use mini_ch_i_dlsode, only: mini_ch_dlsode
   use mini_ch_read_reac_list, only : read_react_list
   use BD_kappa_poly_mod, only : calc_kappa
   use BD_MLT_mod, only : BD_MLT
@@ -55,7 +55,7 @@ program FMS_BD_RC
 
 
   !! MLT variables
-  real(dp), allocatable, dimension(:) :: dt_conv, Kzz, w_osh
+  real(dp), allocatable, dimension(:) :: dt_conv, Kzz
 
   !! Tracer arrays
   integer :: nq
@@ -154,7 +154,7 @@ program FMS_BD_RC
   !! Allocate other arrays we need
   allocate(Tl(nlay), dT_rad(nlay), dT_conv(nlay), net_F(nlev))
   allocate(tau_IRe(nlev), k_IRl(nlay))
-  allocate(Kzz(nlay), mu(nlay), w_osh(nlay), Rd_bar(nlay), cp_bar(nlay), k_prime(nlay))
+  allocate(Kzz(nlay), mu(nlay), Rd_bar(nlay), cp_bar(nlay), k_prime(nlay))
   allocate(k_ext_cld(nlay), a_cld(nlay), g_cld(nlay))
 
   Kzz(:) = 1e1_dp
@@ -246,6 +246,8 @@ program FMS_BD_RC
 
   do n = 1, nstep
 
+    print*, n, nstep
+
 
     select case(chem_scheme)
       case('mini-chem')
@@ -254,7 +256,7 @@ program FMS_BD_RC
             call CE_interpolate_Bezier(pl(k)/1e5_dp,Tl(k),sp_list(:),nsp,VMR_tab_sh,q(k,1:nsp),mu(k))
           else
             q(k,1:nsp) = q(k,1:nsp)/sum(q(k,1:nsp))
-            call mini_ch_seulex(Tl(k), pl(k), t_step, q(k,1:nsp), network)
+            call mini_ch_dlsode(Tl(k), pl(k), t_step, q(k,1:nsp), network)
           end if
           q(k,1:nsp) = q(k,1:nsp)/sum(q(k,1:nsp))
         end do
@@ -302,12 +304,11 @@ program FMS_BD_RC
     case('MLT')
       ! Mixing length theory
       call BD_MLT(nlay, nlev, t_step, Tl, pl, pe, Rd_bar, cp_bar, k_prime, &
-        & grav, dT_conv, Kzz, w_osh)
+        & grav, dT_conv, Kzz)
     case('Dry')
       ! Dry convective adjustment - must use constant kappa!!! 
       call Ray_dry_adj(nlay, nlev, t_step, kappa_air, Tl, pl, pe, dT_conv)
       Kzz(:) = 1e1_dp
-      w_osh(:) = 0.0_dp
     case('None')
       dT_conv(:) = 0.0_dp
     case default
@@ -331,11 +332,11 @@ program FMS_BD_RC
     case('Freedman')
       ! Calculate optical depth structure for Freedman et al. (2014) Rosseland mean fitting function scheme
       call k_Ross_Freedman(Tl(1), pe(1), met_R, k_IRl(1))
-      k_IRl(1) = max(k_IRl(1),1.0e-5_dp)
+      k_IRl(1) = max(k_IRl(1),1.0e-4_dp)
       tau_IRe(1) = (k_IRl(1) * pe(1)) / grav
       do k = 1, nlay
         call k_Ross_Freedman(Tl(k), pl(k), met_R, k_IRl(k))
-        k_IRl(k) = max(k_IRl(k),1.0e-5_dp)
+        k_IRl(k) = max(k_IRl(k),1.0e-4_dp)
         tau_IRe(k+1) = tau_IRe(k) + (k_IRl(k) * dpe(k)) / grav
       end do
     case default
@@ -435,7 +436,7 @@ program FMS_BD_RC
   open(newunit=u,file='FMS_RC_pp_2.out', action='readwrite')
   write(u,*) nlay, nsp, ncld 
   do k = 1, nlay
-    write(u,*) k, pl(k), Tl(k), Rd_bar(k), cp_bar(k), k_prime(k), Kzz(k), w_osh(k)
+    write(u,*) k, pl(k), Tl(k), Rd_bar(k), cp_bar(k), k_prime(k), Kzz(k)
   end do
   close(u)
 

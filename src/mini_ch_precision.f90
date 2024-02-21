@@ -13,7 +13,7 @@ module mini_ch_precision
   public :: sp, dp !, qp
 
 
-  ! Fortran 2008 intrinsic precisions - reccomended if possible
+  ! Fortran 2008 intrinsic precisions - reccomonded if possible
   integer, parameter :: sp = REAL32
   integer, parameter :: dp = REAL64
   ! integer, parameter :: qp = REAL128
@@ -24,8 +24,8 @@ module mini_ch_precision
   !integer, parameter :: qp = selected_real_kind(33, 4931)
 
   ! Ensure machine precision for single and double precision
-  ! integer, parameter :: sp = kind(1.0)
-  ! integer, parameter :: dp = kind(1.0d0)
+  !integer, parameter :: sp = kind(1.0)
+  !integer, parameter :: dp = kind(1.0d0)
 
   ! Ensure dp and qp are double and quadrouple single precision
   !integer, parameter ::  sp = kind(1.0)

@@ -3,8 +3,6 @@ module mini_ch_chem
   use mini_ch_class
   implicit none
 
-
-  private
   public :: reaction_rates, reverse_reactions, check_con
 
 contains
@@ -32,7 +30,7 @@ contains
         k0 = re(i)%A0 * T**re(i)%B0 * exp(-re(i)%C0/T)
         kinf = re(i)%Ainf * T**re(i)%Binf * exp(-re(i)%Cinf/T)
 
-        re_f(i) = (k0 * nd_atm) / (1.0_dp + ((k0 * nd_atm)/kinf))
+        re_f(i) = k0 / (1.0_dp + (k0 * nd_atm/kinf))
 
         !print*, i, k0, kinf
       else if (re(i)%re_t == 4) then
@@ -112,22 +110,21 @@ contains
           ! print*, i, kf
 
         end if
-       
+
         re_f(i) = kf
 
       end if
 
-      re_r(i) = re_f(i)/Keq(i)
-      !print*, i, re_f(i), re_r(i)
+      re_r(i) = re_f(i)/Keq(i) * ((kb * T)/P0)**(re(i)%dmu)
 
     end do
 
   end subroutine reaction_rates
 
-  subroutine reverse_reactions(T, P)
+  subroutine reverse_reactions(T)
     implicit none
 
-    real(dp), intent(in) :: T, P
+    real(dp), intent(in) :: T
 
     integer :: i, j
     real(dp) :: Tn2, Tn1, lnT, T2, T3, T4, Tr
@@ -179,13 +176,11 @@ contains
         ds(i) = ds(i) + s0(re(i)%gi_pr(j))
       end do
 
-      Keq(i) = exp(-(dH(i) - Tr*ds(i))/(R*Tr)) * ((kb * Tr)/P0)**(-re(i)%dmu)
+      Keq(i) = exp(-(dH(i) - Tr*ds(i))/(R*Tr))
 
     end do
 
-
   end subroutine reverse_reactions
-
 
   subroutine check_con(n_sp, n_kp, n_k, t_now, t_old, con)
     implicit none

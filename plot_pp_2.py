@@ -19,7 +19,6 @@ rdbar = data2[:,3]
 cpbar = data2[:,4]
 kprime = data2[:,5] 
 Kzz = data2[:,6] 
-w_osh = data2[:,7] 
 
 
 fig = plt.figure()
@@ -67,15 +66,6 @@ plt.yscale('log')
 plt.xscale('log')
 plt.gca().invert_yaxis()
 
-fig = plt.figure()
-
-plt.plot(w_osh,Ppp/1e5,ls='dashed',lw=3,label='w_osh',c='orange')
-
-plt.ylabel('Pressure [bar]')
-plt.xlabel('w osh')
-plt.legend()
-
-plt.yscale('log')
-plt.gca().invert_yaxis()
+plt.xlim(1e1,1e12)
 
 plt.show()

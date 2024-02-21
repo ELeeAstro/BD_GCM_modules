@@ -16,7 +16,7 @@ b_sh = 'hybrid_sig/Hybrid_sig_60_b.txt'
 pref = 1e7
 
 t_step = 60.0
-nstep = 100000
+nstep = 10000
 Rd_air = 3571.0 
 cp_air = 12542.0
 grav = 316.0
@@ -51,7 +51,7 @@ sp_file = 'chem_data/mini_chem_sp_NCHO.txt'
 net_dir = 'chem_data/1x/'
 met = '1x'
 
-p_CE = 1e6
+p_CE = 1e7
 
 /
 
