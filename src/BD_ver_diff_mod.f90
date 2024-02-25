@@ -25,7 +25,6 @@ contains
     real(dp), dimension(nlay,nq), intent(inout) :: q
 
     integer :: k
-    real(dp) :: h1, h2, d1Kzz
     real(dp), dimension(nlev) :: alte, lpe, Kzz_e, Te, nde
     real(dp), dimension(nlay) :: delz, delz_mid
 
@@ -44,9 +43,10 @@ contains
 
     ! Find Kzz at levels
     Kzz_e(1) = Kzz(1)
-    do k = 2, nlev
+    do k = 2, nlay
       Kzz_e(k) = (Kzz(k-1) + Kzz(k))/2.0_dp
     end do
+    Kzz_e(nlev) = Kzz(nlay)
 
     do k = 2, nlay
       call linear_interp(lpe(k), lpl(k-1), lpl(k), lTl(k-1), lTl(k), Te(k))
@@ -86,7 +86,7 @@ contains
 
     !! Begin timestepping routine
     t_now = 0.0_dp
-    n_it = 1
+    n_it = 0
 
     do while ((t_now < t_end) .and. (n_it < 100000))
 

@@ -24,7 +24,7 @@ module BD_clouds_mod
 
   real(dp), parameter :: kb = 1.380649e-16_dp
   real(dp), parameter :: amu = 1.66053906660e-24_dp ! g mol-1 (note, has to be cgs g mol-1 !!!)
-  real(dp), parameter :: R = 8.31446261815324_dp
+  real(dp), parameter :: R_gas = 8.31446261815324_dp
 
   !! Diameter, LJ potential and molecular weight for background gases ! Do everything in cgs for vf calculation
   real(dp), parameter :: d_OH = 3.06e-8_dp, LJ_OH = 100.0_dp * kb, molg_OH = 17.00734_dp  ! estimate
@@ -85,7 +85,7 @@ contains
         cycle
       end if
 
-      mu = R/Rd_air(k) * 1000.0_dp
+      mu = R_gas/Rd_air(k) * 1000.0_dp
 
       rho = (pl(k) * mu * amu)/ (kb * Tl(k)) ! g cm-3
 
@@ -217,7 +217,7 @@ contains
 
     pl(:) = pl_in(:) * 10.0_dp ! Convert Pa to Dyne
 
-    mu(:) = R/Rd_air(:) * 1000.0_dp ! Atmospheric molecualr weight (g mol-1)
+    mu(:) = R_gas/Rd_air(:) * 1000.0_dp ! Atmospheric molecualr weight (g mol-1)
 
     grav = grav_in * 100.0_dp ! gravity in cm s-2 
 
@@ -282,9 +282,9 @@ contains
     real(dp), dimension(nlay), intent(inout) :: q_v, q_c
 
     integer :: k
-    real(dp) :: p_vap, q_s, dqvdt, dqcdt, t_c, tau_deep, Hp
+    real(dp) :: p_vap, q_s, tau_deep, Hp
 
-    real(dp) :: t_now, dt, dq, dqc
+    real(dp) :: t_now
 
     integer :: itol, iout, idid
     integer, dimension(2) :: ipar
@@ -381,25 +381,16 @@ contains
       ! Evaporate the cloud mass portion
       t_c = t_evap
 
-      if (y(2) < 1e-20_dp) then
-        ! There is not enough q_c to evaporate from
-        f(1) = 0.0_dp    
-      else
-        ! Evaporate from q_c
-        f(1) = min(rpar(3) - y(1), y(2))/t_c
-      end if
+      ! Evaporate from q_c
+      f(1) = min(rpar(3) - y(1), y(2))/t_c
 
     else if (sat > 1.01_dp) then
+
       ! Condense the cloud vapour portion
       t_c = t_grow
 
-      if (y(1) < 1e-20_dp) then
-        ! There is not enough q_v to condense from
-        f(1) = 0.0_dp
-      else
-        ! Condense q_v toward the saturation ratio
-        f(1) = -(y(1) - rpar(3))/t_c
-      end if
+      ! Condense q_v toward the saturation ratio
+      f(1) = -(y(1) - rpar(3))/t_c
 
     else
       f(1) = 0.0_dp

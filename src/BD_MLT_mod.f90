@@ -123,6 +123,8 @@ contains
     !! Calculate the overshoot component - assume from end state (no running average)
 
     !! First find the rcb boundary 
+    krcb = nlay
+    w_rcb = 1e-30_dp
     do k = nlay, 1, -1
       if (Fc(k) > 0.0_dp) then
         krcb = k

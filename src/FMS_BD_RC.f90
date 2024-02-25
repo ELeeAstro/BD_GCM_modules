@@ -292,7 +292,7 @@ program FMS_BD_RC
     case('Tracer')
       call BD_clouds_chem(nlay, t_step, cld_sp(1), q(:,nsp+1), q(:,nsp+2), pl, Tl, Rd_bar, Kzz, q0_cld(1), grav)
       call BD_clouds_vf(nlay, nsp, Rd_bar, grav, q(:,1:nsp), pl, Tl, q(:,nsp+2), vf)
-      call BD_clouds_adv(nlay, nlev, Rd_bar, grav, Tl, pl, pe, 1, t_step, q(:,nsp+2), vf)
+      call BD_clouds_adv(nlay, nlev, Rd_bar, grav, Tl, pe, 1, t_step, q(:,nsp+2), vf)
     case('None')
     case default
       print*, 'Invalid cloud_scheme: ', trim(cloud_chem_scheme)

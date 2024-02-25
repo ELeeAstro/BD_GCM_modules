@@ -2,7 +2,7 @@
 
 ts_scheme = 'Toon_scatter'
 opac_scheme = 'Freedman'
-chem_scheme = 'CE'
+chem_scheme = 'mini-chem'
 adj_scheme = 'MLT'
 diff_scheme = 'Explicit'
 cloud_chem_scheme = 'Tracer'
@@ -15,8 +15,8 @@ b_sh = 'hybrid_sig/Hybrid_sig_60_b.txt'
 
 pref = 1e7
 
-t_step = 60.0
-nstep = 10000
+t_step = 120.0
+nstep = 50000
 Rd_air = 3571.0 
 cp_air = 12542.0
 grav = 316.0

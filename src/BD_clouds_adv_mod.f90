@@ -12,12 +12,12 @@ module BD_clouds_adv_mod
 
   contains
  
-  subroutine BD_clouds_adv(nlay, nlev, Rd_air, grav, Tl, pl, pe, nq, tend, q, vf)
+  subroutine BD_clouds_adv(nlay, nlev, Rd_air, grav, Tl, pe, nq, tend, q, vf)
     implicit none
 
     integer, intent(in) :: nlay, nlev, nq
     real(dp), dimension(nlay,nq), intent(inout) :: q
-    real(dp), dimension(nlay), intent(in) :: vf, Rd_air, Tl, pl
+    real(dp), dimension(nlay), intent(in) :: vf, Rd_air, Tl
     real(dp), dimension(nlev), intent(in) :: pe
     real(dp), intent(in) :: tend, grav
 
@@ -32,9 +32,10 @@ module BD_clouds_adv_mod
 
     ! Find velocity at levels
     vf_e(1) = vf_c(1)
-    do k = 2, nlev
+    do k = 2, nlay
       vf_e(k) = (vf_c(k-1) + vf_c(k))/2.0_dp
     end do
+    vf_e(nlev) = vf_c(nlay)
 
     !! First calculate the vertical height (m) assuming hydrostatic equilibrium
     alte(nlev) = 0.0_dp
@@ -54,6 +55,9 @@ module BD_clouds_adv_mod
     do k = 1, nlay
       dt = min(dt,cfl*(delz_mid(k))/abs(vf_e(k+1)))
     enddo
+
+    tnow = 0.0_dp
+    iit = 0
 
     do while ((tnow < tend) .and. (iit < 1000000))
 

@@ -114,7 +114,7 @@ module BD_kappa_poly_mod
 
     integer :: u, i
 
-    open(unit=u,file='data/NASA_9_poly.txt',action='read',status='old',form='formatted')
+    open(newunit=u,file='data/NASA_9_poly.txt',action='read',status='old',form='formatted')
 
     do i = 1, 6
       read(u,*)
