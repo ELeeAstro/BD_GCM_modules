@@ -1,6 +1,6 @@
 &FMS_BD_RC_nml
 
-ts_scheme = 'Toon_scatter'
+ts_scheme = 'lw_Toon'
 opac_scheme = 'Freedman'
 chem_scheme = 'mini-chem'
 adj_scheme = 'MLT'
@@ -13,16 +13,15 @@ nlay = 60
 a_sh = 'hybrid_sig/Hybrid_sig_60_a.txt'
 b_sh = 'hybrid_sig/Hybrid_sig_60_b.txt'
 
-pref = 1e7
+pref = 1e8
 
-t_step = 120.0
-nstep = 50000
+t_step = 60.0
+nstep = 1000
 Rd_air = 3571.0 
 cp_air = 12542.0
 grav = 316.0
-Tint = 1100.0
+Tint = 500.0
 
-Bezier = .True.
 
 k_IR = 1e-3
 met_R = 0.0
@@ -43,7 +42,7 @@ ncld = 1
 
 sp_list = 'OH','H2','H2O','H','CO','CO2','O','CH4','C2H2','NH3','N2','HCN','He'
 mw = 17.00734, 2.01588, 18.01528, 1.007940, 28.0101, 44.0095, 15.99940, 16.0425, 26.0373, 17.03052, 28.01340, 27.0253, 4.0026020
-VMR_tab_sh = 'chem_data/mini_chem_IC_FastChem_1x.txt'
+VMR_tab_sh = 'chem_data/IC/mini_chem_IC_FastChem_1x.txt'
 network = 'NCHO'
 
 data_file = 'chem_data/mini_chem_data_NCHO.txt'

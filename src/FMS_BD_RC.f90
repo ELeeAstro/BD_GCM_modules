@@ -6,16 +6,16 @@ program FMS_BD_RC
   use, intrinsic :: iso_fortran_env
   use k_Rosseland_mod, only : k_Ross_Freedman
   use IC_mod, only : IC_profile
-  use CE_mod, only : CE_interpolate_Bezier
+  use ce_interp_mod, only : interp_ce_table
   use mini_ch_i_dlsode, only: mini_ch_dlsode
   use mini_ch_read_reac_list, only : read_react_list
   use BD_kappa_poly_mod, only : calc_kappa
-  use BD_MLT_mod, only : BD_MLT
+  use MLT_mod, only : MLT
   use BD_clouds_mod, only : BD_clouds_chem, BD_clouds_vf, BD_clouds_Ross_opac
   use BD_clouds_adv_mod, only : BD_clouds_adv
   use BD_vert_diff_mod, only: BD_vert_diff
   use dry_conv_adj_mod, only :  Ray_dry_adj
-  use ts_Toon_scatter_mod, only : ts_Toon_scatter
+  use lw_Toon_mod, only : lw_Toon
   use ieee_arithmetic
   implicit none
 
@@ -33,22 +33,20 @@ program FMS_BD_RC
   real(dp), allocatable, dimension(:) :: Tl, pl, pe, dpe
   real(dp), allocatable, dimension(:) :: k_IRl
   real(dp), allocatable, dimension(:) :: tau_IRe
-  real(dp), allocatable, dimension(:) :: dT_rad, net_F
+  real(dp), allocatable, dimension(:) :: dT_rad, net_F, lw_down, lw_up, lw_net
 
   real(dp), allocatable, dimension(:) :: lw_a, lw_g
 
   real(dp), allocatable, dimension(:) :: vf
 
   real(dp) :: cp_air, grav, k_IR, kappa_air, Rd_air
-  real(dp) :: lw_ac, lw_gc
+  real(dp) :: lw_ac, lw_gc, a_surf
 
   integer :: iIC
   logical :: corr
   real(dp) :: prc
 
   real(dp) :: olr
-
-  logical :: Bezier
 
   !! kapp_prime calculation
   real(dp), allocatable, dimension(:) :: mu, Rd_bar, cp_bar, k_prime
@@ -96,7 +94,7 @@ program FMS_BD_RC
     & kappa_prime_calc, cloud_opac_scheme, &
     & nlay, a_sh, b_sh, pref, &
     & t_step, nstep, Rd_air, cp_air, grav, Tint, k_IR, met_R, &
-    & iIC, corr, lw_ac, lw_gc, Bezier, lw_a_surf, &
+    & iIC, corr, lw_ac, lw_gc, lw_a_surf, &
     & &
     & nsp, ncld
 
@@ -152,7 +150,7 @@ program FMS_BD_RC
   end do
 
   !! Allocate other arrays we need
-  allocate(Tl(nlay), dT_rad(nlay), dT_conv(nlay), net_F(nlev))
+  allocate(Tl(nlay), dT_rad(nlay), dT_conv(nlay), net_F(nlev), lw_down(nlev), lw_up(nlev), lw_net(nlev))
   allocate(tau_IRe(nlev), k_IRl(nlay))
   allocate(Kzz(nlay), mu(nlay), Rd_bar(nlay), cp_bar(nlay), k_prime(nlay))
   allocate(k_ext_cld(nlay), a_cld(nlay), g_cld(nlay))
@@ -206,7 +204,7 @@ program FMS_BD_RC
 
   !! Make CE initial conditions for chemistry
   do k = 1, nlay
-    call CE_interpolate_Bezier(pl(k)/1e5_dp,Tl(k),sp_list(:),nsp,VMR_tab_sh,q(k,1:nsp),mu(k))
+    call interp_ce_table(nsp, Tl(k), pl(k)/1e5_dp, q(k,:), mu(k), VMR_tab_sh)
     q(k,1:nsp) = q(k,1:nsp)/sum(q(k,1:nsp))
     !print*, k, q(k,:), mu(k)
   end do
@@ -253,7 +251,8 @@ program FMS_BD_RC
       case('mini-chem')
         do k = 1, nlay
           if (pl(k) > p_CE) then
-            call CE_interpolate_Bezier(pl(k)/1e5_dp,Tl(k),sp_list(:),nsp,VMR_tab_sh,q(k,1:nsp),mu(k))
+            call interp_ce_table(nsp, Tl(k), pl(k), q(k,:), mu(k), VMR_tab_sh)
+            q(k,1:nsp) = q(k,1:nsp)/sum(q(k,1:nsp))
           else
             q(k,1:nsp) = q(k,1:nsp)/sum(q(k,1:nsp))
             call mini_ch_dlsode(Tl(k), pl(k), t_step, q(k,1:nsp), network)
@@ -262,7 +261,7 @@ program FMS_BD_RC
         end do
       case('CE') 
         do k = 1, nlay
-          call CE_interpolate_Bezier(pl(k)/1e5_dp,Tl(k),sp_list(:),nsp,VMR_tab_sh,q(k,1:nsp),mu(k))
+          call interp_ce_table(nsp, Tl(k), pl(k), q(k,:), mu(k), VMR_tab_sh)
           q(k,1:nsp) = q(k,1:nsp)/sum(q(k,1:nsp))
         end do
       case default
@@ -302,9 +301,9 @@ program FMS_BD_RC
     !! Convective adjustment scheme
     select case(adj_scheme)
     case('MLT')
-      ! Mixing length theory
-      call BD_MLT(nlay, nlev, t_step, Tl, pl, pe, Rd_bar, cp_bar, k_prime, &
-        & grav, dT_conv, Kzz)
+      ! Use mixing length theory (MLT) to time dependently adjust the adiabat and estimate Kzz
+      call MLT(nlay, nlev, t_step, Tl, pl, pe, Rd_bar, cp_bar, k_prime, &
+         & grav, dT_conv, Kzz)
     case('Dry')
       ! Dry convective adjustment - must use constant kappa!!! 
       call Ray_dry_adj(nlay, nlev, t_step, kappa_air, Tl, pl, pe, dT_conv)
@@ -365,16 +364,10 @@ program FMS_BD_RC
 
     !! Two stream radiative transfer step
     select case(ts_scheme)
-    case('Toon_scatter')
-      tau_Ve(:) = 0.0_dp
-      mu_z = 0.0_dp
-      F0 = 0.0_dp
-      AB = 0.0_dp
-      sw_a(:) = 0.0_dp
-      sw_g(:) = 0.0_dp
-      sw_a_surf = 0.0_dp
-      call ts_Toon_scatter(Bezier, nlay, nlev, Tl, pl, pe, tau_Ve, tau_IRe, mu_z, F0, Tint, AB, &
-        & sw_a, sw_g, lw_a, lw_g, sw_a_surf, lw_a_surf, net_F, olr, asr)
+    case('lw_Toon')
+      a_surf = 0.0_dp
+      ! Toon89 longwave method with multiple scattering
+      call lw_Toon(nlay, nlev, Tl, pl, pe, tau_IRe, lw_a, lw_g, a_surf, Tint, lw_up, lw_down, lw_net, olr)
     case('None')
       net_F(:) = 0.0_dp
     case default
@@ -383,9 +376,9 @@ program FMS_BD_RC
     end select
 
     !! Calculate the temperature tendency due to radiation
-    do k = 1, nlay
-      dT_rad(k) = (grav/cp_bar(k)) * (net_F(k+1)-net_F(k))/(dpe(k))
-      !print*, n, i, dT_rad(i)
+    net_F(:) = lw_net(:) ! Net flux into/out of level
+    do i = 1, nlay
+      dT_rad(i) = (grav/cp_air) * (net_F(i+1)-net_F(i))/(dpe(i))
     end do
 
     !! Forward march the temperature change in each layer from convection and radiation

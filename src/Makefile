@@ -33,23 +33,24 @@ LFLAGS    = $(FFLAGS)
 
 
 OBJECTS = \
+   WENO4_mod.o \
     dopri5.o \
 	  k_Rosseland_mod.o \
 	  IC_mod.o \
 		BD_kappa_poly_mod.o \
-		BD_MLT_mod.o \
+		MLT_mod.o \
 		BD_clouds_mod.o \
     BD_ver_diff_mod.o \
 		BD_clouds_adv_mod.o \
 		dry_conv_adj_mod.o \
-		CE_mod.o \
+		ce_interp_mod.o \
 		dlsode.o \
 		mini_ch_precision.o \
 		mini_ch_class.o \
 		mini_ch_read_reac_list.o \
 		mini_ch_chem.o \
 		mini_ch_i_dlsode.o \
-	  ts_Toon_scatter_mod.o \
+	  lw_Toon_mod.o \
     FMS_BD_RC.o
 
 # executable statement
